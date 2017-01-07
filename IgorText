@@ -1,0 +1,191 @@
+//Determines values Peak current ratio, residual current, and the first and lack peaks for a tuning curve. 
+#pragma rtGlobals=1		// Use modern global access method.
+
+Function GraphVibSims_5Kbal(ra,rb,rc,rd,re,rf,slope,name)
+
+variable ra //closed to open
+variable rb //open to closed
+variable rc //open to inactivated
+variable rd //inactivated to open
+variable re //inactivated to closed
+variable rf //closed to inactivated
+//variable scalefactor //this is what the real data will be multiplied by 
+variable slope //pressure dependence OF ra
+//variable graphflag //this should be 1 if you want graphs, 0 (or any non-1 number) if you do not want graphs
+string name //this is what you want to call this family (e.g. "a") so that each family will be permanent and unique. MUST have ""
+
+//constants all should be in terms of /ms
+
+Make/O/N=20000 Pressure
+//Make/O/N=20000 Boltzfactor
+Make/O/N=20000 Popen
+Make/O/N=20000 Pinact
+Make/O/N = 20000 Pclosed
+Make/O/N = 20000 Rawave
+Make/O/N = 20000 Rewave
+Make/O/N = 20000 Timewave5k //this is the xaxis for final waves; note that everything is based on sampling of 5Khz
+Make/O/N=1 scalefactor
+
+ra = ra/50
+rb = rb/50
+rc = rc/50
+rd = rd/50
+re = re/50
+rf = rf/50 //calibrates constants for 50 khz sampling for test pulse (assuming they are currently in /ms)
+
+Popen = 0
+Pinact = 0
+Pclosed = 0
+Pressure = 0
+//Boltzfactor = 0
+rawave = 0
+rewave = 0
+//p50wave = 0
+//sfwave = 0
+
+
+
+Make/O/N=11 Freqwave
+Freqwave={0.5,1,2,5,10,20,50,100,200,500,1000} //this is the wave of frequencies you want to check; if you add/subtract, update N for freqwave and the index2 check at the end
+variable index2 = 0 //cycles through frquencies
+string frqstr = num2str(freqwave[index2])
+
+Make/O/N=11 Peakratio
+variable mina //peak of 1st sec
+variable minb //peak of 2nd sec
+variable wind //where to look for last peak
+
+Make/O/N=11 BegInt
+Make/O/N=11 EndInt
+Make/O/N=11 Residual
+Make/O/N=11 LastPeak
+Make/O/N=11 LastBase
+Make/O/N=11 FirstPeak
+variable int1
+variable int2
+variable basea
+
+Make/O/N=8 constants
+constants={ra,rb,rc,rd,re,rf,slope}
+rename constants $("rateconstants_"+name)
+
+
+//now plotting a 300 ms test pulse surrounded by 10 ms at +5 mmHg (to use for scaling)
+Make/O/N=20500 PressureTest
+Make/O/N=20500 BoltzfactorTest
+Make/O/N=20500 PopenTest
+Make/O/N=20500 PinactTest
+Make/O/N = 20500 PclosedTest
+Make/O/N = 20500 RawaveTest
+Make/O/N = 20500 RewaveTest
+Make/O/N = 20500 TimewaveTest50k
+
+variable index = 0 //main index to create pressure, boltzmann, various Po waves
+	PressureTest[0,499] = -50
+	PopenTest[index] = 0
+	PinactTest[index] = 0
+	PclosedTest[index] = 1
+	TimewaveTest50k[index] = 0
+
+  		do
+		index +=1
+		TimewaveTest50k[index] = index*.00002
+		//BoltzfactorTest[index] =  (1/(1+EXP(-(pressuretest[index]-P50)/-10))) //calculates the steady-state Po using the fits from Elife paper
+		rawaveTest[index]= ra*exp(PressureTest[index]/-slope)
+		rewaveTest[index] = re*exp(PressureTest[index]/slope)
+		PopenTest[index] = PopenTest[(index-1)] + PclosedTest[(index-1)]*(rawaveTest[index]) + PinactTest[(index-1)]*rd - PopenTest[(index-1)]*(rb+rc)
+		PinactTest[index] = PInactTest[(index-1)] + PopenTest[(index-1)]*rc + PclosedTest[(index-1)]*rf - PinactTest[(index-1)]*(rd+rewaveTest[index])
+		PclosedTest[index] = PclosedTest[(index-1)] + PInactTest[(index-1)]*rewaveTest[index] + PopenTest[(index-1)]*rb - PclosedTest[(index-1)]*(rawaveTest[index]+rf)
+		while (index <= 20500)
+Duplicate/O Popentest $("Popentest"+name)
+Wavestats Popentest  
+scalefactor = V_max
+
+Display Popentest $("Popentest"+name) vs timewavetest50k
+	ModifyGraph lsize(Popentest)=1.5 
+	
+ra = ra*10
+rb = rb*10
+rc = rc*10
+rd = rd*10
+re = re*10
+rf = rf*10 //recalibrates constants for 5 khz sampling (assuming they are currently in /ms)
+
+do
+
+	index = 0 //main index to create pressure, boltzmann, various Po waves
+	Pressure[index] = 5 
+	//Boltzfactor[index]= 1/(1+exp((pressure[index]-P50)/-10)) //this is what ra and re will be multiplied by to find their updated values
+	Popen[index] = 0
+	Pinact[index] = 0
+	Pclosed[index] = 1
+	Timewave5k[index] = 0
+	
+
+  		do
+		index +=1
+		Timewave5k[index] = index*.0002
+		Pressure[index] = -22.5-27.5*SIN(2*(pi*(freqwave[index2]*index/5000)-pi/4)) //sets up a pressure wave oscillating as a sine function from +5 to -50 mmHg
+		rawave[index]= ra*exp(Pressure[index]/-slope)
+		rewave[index] = re*exp(Pressure[index]/slope)
+		Popen[index] = Popen[(index-1)] + Pclosed[(index-1)]*(rawave[index]) + Pinact[(index-1)]*rd - Popen[(index-1)]*(rb+rc)
+		Pinact[index] = PInact[(index-1)] + Popen[(index-1)]*rc + Pclosed[(index-1)]*rf - Pinact[(index-1)]*(rd+rewave[index])
+		Pclosed[index] = Pclosed[(index-1)] + PInact[(index-1)]*rewave[index] + Popen[(index-1)]*rb - Pclosed[(index-1)]*(rawave[index]+rf)
+		while (index <= 20000)
+	Popen = Popen/scalefactor
+	Duplicate Popen $("Popen"+frqstr+name) //this section renames the waves
+	Duplicate Pinact $("Pinact"+frqstr+name)
+	Duplicate Pclosed $("Pclosed"+frqstr+name)
+	Duplicate Pressure $("Pressure"+frqstr+name)
+	
+	
+	
+	
+	
+
+	
+	//if (graphflag == 1)
+	Display $("Popen"+frqstr+name) vs  timewave5k
+	AppendtoGraph/R $("Pressure"+frqstr+name) vs timewave5k
+	ModifyGraph rgb($("Pressure"+frqstr+name))=(0,0,65325)
+	ModifyGraph lsize($("Popen"+frqstr+name))=1.5
+	ModifyGraph rgb($("avgscaled_"+frqstr+name))=(0,0,0)
+	//endif
+	
+	wind = 5000/freqwave[index2]
+	wavestats/q/r=[(20000-wind),20000] $("Popen"+frqstr+name) //this section finds the ratio of the last peak of the vibration to the first at each frequency
+	mina = V_max
+	wavestats/q/r=[(20000-wind),20000] $("Popen"+frqstr+name)
+	basea = V_min
+	wavestats/q/r=[0,wind] $("Popen"+frqstr+name)
+	minb = v_max
+	Peakratio[index2] = mina/minb
+	LastPeak[index2] = mina
+	LastBase[index2] = basea
+	Firstpeak[index2] = minb
+	
+
+	Integrate $("Popen"+frqstr+name)/D= Integratedwave
+	BegInt[index2] = Integratedwave[5000] - integratedwave[0]
+	EndInt[index2] = Integratedwave[20000] - integratedwave[15000]
+ 	
+ 	index2 += 1
+	frqstr = num2str(freqwave[index2])
+
+	
+while (index2 <=10)
+
+//renaming calculations to unique names
+duplicate peakratio $("Peakratio"+name)
+Duplicate Residual $("residual"+name)
+duplicate Begint $("begint"+name)
+duplicate EndInt $("Endint"+name)
+duplicate Lastpeak $("LastPeak"+name)
+duplicate Lastbase $("LastBase"+name)
+duplicate Firstpeak $("FirstPeak"+name)
+
+
+
+Edit $("BegInt"+name) $("EndInt"+name) $("Peakratio"+name) $("Residual"+name) $("rateconstants_"+name)
+	
+end
